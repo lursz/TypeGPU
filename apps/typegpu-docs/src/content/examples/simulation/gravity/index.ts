@@ -3,6 +3,7 @@ import * as d from 'typegpu/data';
 import { load } from '@loaders.gl/core';
 import { OBJLoader } from '@loaders.gl/obj';
 import { mul } from 'typegpu/std';
+import * as m from 'wgpu-matrix';
 
 const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
@@ -14,9 +15,28 @@ context.configure({
   alphaMode: 'premultiplied',
 });
 
-const cubeModel = await load('cube.obj', OBJLoader);
+const cubeModel = await load('assets/gravity/cube.obj', OBJLoader);
 console.log(cubeModel.attributes);
 
+// Camera
+const Camera = d.struct({
+  view: d.mat4x4f,
+  projection: d.mat4x4f,
+});
+const target = d.vec3f(0, 0, 0);
+const cameraInitialPos = d.vec4f(5, 2, 5, 1);
+const cameraInitial = {
+  view: m.mat4.lookAt(cameraInitialPos, target, d.vec3f(0, 1, 0), d.mat4x4f()),
+  projection: m.mat4.perspective(Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 1000, d.mat4x4f()),
+};
+const cameraBuffer = root.createBuffer(Camera, cameraInitial).$usage('uniform');
+
+const bindGroupLayout = tgpu.bindGroupLayout({ camera: { uniform: Camera } });
+const { camera } = bindGroupLayout.bound;
+
+const bindGroup = root.createBindGroup(bindGroupLayout, { camera: cameraBuffer });
+
+// Vertex struct
 const Vertex = d.struct({
   position: d.location(0, d.vec3f),
   normal: d.location(1, d.vec3f),
@@ -48,27 +68,26 @@ vertexBuffer.write(vertices);
 // Shaders
 const mainVertex = tgpu['~unstable']
   .vertexFn({
-    in: { position: d.vec3f, normal: d.vec3f, uv: d.vec2f },
-    out: { position: d.builtin.position, color: d.vec4f },
+    in: { position: d.vec4f, normal: d.vec3f, uv: d.vec2f },
+    out: { position: d.builtin.position },
   })
   .does((input) => {
-    const pos = mul(0.1, input.position);
+    const pos = mul(
+      camera.value.projection,
+      mul(camera.value.view, input.position),
+    );
 
     return {
-      position: d.vec4f(pos.x, pos.y, pos.z, 1),
-      color: d.vec4f(1, 0, 0, 1),
+      position: pos,
     };
   })
   .$name('mainVertex');
 
 const mainFragment = tgpu['~unstable']
   .fragmentFn({
-    in: { color: d.vec4f },
     out: d.location(0, d.vec4f),
   })
-  .does((input) => {
-    return input.color;
-  })
+  .does(() => d.vec4f(1, 0, 0, 1))
   .$name('mainFragment');
 
 // Render pipeline
@@ -78,16 +97,86 @@ const renderPipeline = root['~unstable']
   .withPrimitive({ topology: 'triangle-list' })
   .createPipeline();
 
+function render() {
+  renderPipeline
+    .withColorAttachment({ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] })
+    .with(vertexLayout, vertexBuffer)
+    .with(bindGroupLayout, bindGroup)
+    .draw(36);
 
-renderPipeline
-  .withColorAttachment({ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 0, 1] })
-  .with(vertexLayout, vertexBuffer)
-  .draw(36);
-
-// debug
+  root['~unstable'].flush();
+}
 console.log('Cube position:', await vertexBuffer.read())
 
-root['~unstable'].flush();
+let destoyed = false;
+function frame() {
+  if (destoyed) {
+    return;
+  }
+  requestAnimationFrame(frame);
+  render();
+}
+
+
+
+let isDragging = false;
+let prevX = 0;
+let prevY = 0;
+let rotation = m.mat4.identity(d.mat4x4f());
+
+canvas.addEventListener('mousedown', (event) => {
+  isDragging = true;
+  prevX = event.clientX;
+  prevY = event.clientY;
+});
+
+canvas.addEventListener('mouseup', () => {
+  isDragging = false;
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  if (!isDragging) {
+    return;
+  }
+
+  const dx = event.clientX - prevX;
+  const dy = event.clientY - prevY;
+  prevX = event.clientX;
+  prevY = event.clientY;
+  const sensitivity = 0.003;
+  const yaw = -dx * sensitivity;
+  const pitch = -dy * sensitivity;
+
+  const yawMatrix = m.mat4.rotateY(
+    m.mat4.identity(d.mat4x4f()),
+    yaw,
+    d.mat4x4f(),
+  );
+  const pitchMatrix = m.mat4.rotateX(
+    m.mat4.identity(d.mat4x4f()),
+    pitch,
+    d.mat4x4f(),
+  );
+
+  const deltaRotation = m.mat4.mul(yawMatrix, pitchMatrix, d.mat4x4f());
+  rotation = m.mat4.mul(deltaRotation, rotation, d.mat4x4f());
+
+  const rotatedCamPos = m.mat4.mul(rotation, cameraInitialPos, d.vec4f());
+  const newView = m.mat4.lookAt(
+    rotatedCamPos,
+    target,
+    d.vec3f(0, 1, 0),
+    d.mat4x4f(),
+  );
+
+  cameraBuffer.writePartial({
+    view: newView,
+  });
+});
+
+frame();
+
 export function onCleanup() {
+  destoyed = true;
   root.destroy();
 }
