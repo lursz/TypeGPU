@@ -20,4 +20,5 @@ export {
   exp,
   mix,
   pow,
+  reflect,
 } from './numeric';
