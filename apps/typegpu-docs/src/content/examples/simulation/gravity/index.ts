@@ -21,7 +21,11 @@ const bindGroupLayout = tgpu.bindGroupLayout({
   texture: { texture: 'float' },
   sampler: { sampler: 'filtering' },
 });
-const { camera, texture: shaderTexture, sampler: shaderSampler } = bindGroupLayout.bound;
+const {
+  camera,
+  texture: shaderTexture,
+  sampler: shaderSampler,
+} = bindGroupLayout.bound;
 
 // Shaders
 const sampleTexture = tgpu['~unstable']
@@ -35,7 +39,11 @@ const sampleTexture = tgpu['~unstable']
 const mainVertex = tgpu['~unstable']
   .vertexFn({
     in: { position: d.vec4f, normal: d.vec3f, uv: d.vec2f },
-    out: { position: d.builtin.position, uv: d.location(1, d.vec2f) },
+    out: {
+      position: d.builtin.position,
+      uv: d.location(1, d.vec2f),
+      normals: d.location(2, d.vec3f),
+    },
   })
   .does((input) => {
     const pos = mul(
@@ -46,18 +54,21 @@ const mainVertex = tgpu['~unstable']
     return {
       position: pos,
       uv: input.uv,
+      normals: input.normal,
     };
   })
   .$name('mainVertex');
 
 const mainFragment = tgpu['~unstable']
   .fragmentFn({
-    in: {uv: d.location(1, d.vec2f)},
+    in: { uv: d.location(1, d.vec2f), normals: d.location(2, d.vec3f) },
     out: d.location(0, d.vec4f),
   })
-  .does((input) => sampleTexture(input.uv))
+  // .does((input) => sampleTexture(input.uv))
+  .does((input) => {
+    return d.vec4f(input.normals.x, input.normals.y, input.normals.z, 1);
+  })
   .$name('mainFragment');
-
 
 const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
@@ -73,7 +84,7 @@ context.configure({
 const cubeModel = await load('assets/gravity/cube_blend.obj', OBJLoader);
 const textureResponse = await fetch('assets/gravity/cube_texture.png');
 const imageBitmap = await createImageBitmap(await textureResponse.blob());
-const cubeTexture = root[`~unstable`]
+const cubeTexture = root['~unstable']
   .createTexture({
     size: [imageBitmap.width, imageBitmap.height],
     format: 'rgba8unorm',
@@ -107,7 +118,6 @@ const cameraInitial = {
 };
 const cameraBuffer = root.createBuffer(Camera, cameraInitial).$usage('uniform');
 
-
 const bindGroup = root.createBindGroup(bindGroupLayout, {
   camera: cameraBuffer,
   texture: cubeTexture,
@@ -117,19 +127,17 @@ const bindGroup = root.createBindGroup(bindGroupLayout, {
 // Vertex
 const vertexBuffer = root
   .createBuffer(
-    vertexLayout.schemaForCount(
-      cubeModel.attributes['POSITION'].value.length / 3,
-    ),
+    vertexLayout.schemaForCount(cubeModel.attributes.POSITION.value.length / 3),
   )
   .$usage('vertex')
   .$name('vertex');
 
-const positions = cubeModel.attributes['POSITION'].value;
-const normals = cubeModel.attributes['NORMAL']
-  ? cubeModel.attributes['NORMAL'].value
+const positions = cubeModel.attributes.POSITION.value;
+const normals = cubeModel.attributes.NORMAL
+  ? cubeModel.attributes.NORMAL.value
   : new Float32Array(positions.length);
-const uvs = cubeModel.attributes['TEXCOORD_0']
-  ? cubeModel.attributes['TEXCOORD_0'].value
+const uvs = cubeModel.attributes.TEXCOORD_0
+  ? cubeModel.attributes.TEXCOORD_0.value
   : new Float32Array((positions.length / 3) * 2);
 
 const vertices = [];
