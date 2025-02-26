@@ -2,7 +2,7 @@ import { load } from '@loaders.gl/core';
 import { OBJLoader } from '@loaders.gl/obj';
 import tgpu from 'typegpu';
 import * as d from 'typegpu/data';
-import { mul } from 'typegpu/std';
+import { dot, mul, normalize } from 'typegpu/std';
 import * as m from 'wgpu-matrix';
 
 const Vertex = d.struct({
@@ -58,7 +58,7 @@ const mainVertex = tgpu['~unstable']
     };
   })
   .$name('mainVertex');
-
+const light_direction = normalize(d.vec3f(2.0, 1.0, 0.5));
 const mainFragment = tgpu['~unstable']
   .fragmentFn({
     in: { uv: d.location(1, d.vec2f), normals: d.location(2, d.vec3f) },
@@ -66,8 +66,11 @@ const mainFragment = tgpu['~unstable']
   })
   // .does((input) => sampleTexture(input.uv))
   .does((input) => {
-    return d.vec4f(input.normals.x, input.normals.y, input.normals.z, 1);
+    const dotVal: number = dot(input.normals, light_direction);
+    const albedo = d.vec3f(0.4);
+    return d.vec4f(albedo.x * dotVal, albedo.y * dotVal, albedo.z * dotVal, 1);
   })
+  .$uses({ light_direction })
   .$name('mainFragment');
 
 const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -103,7 +106,7 @@ const sampler = device.createSampler({
   minFilter: 'linear',
 });
 
-// Camera
+// Cameraff
 const target = d.vec3f(0, 0, 0);
 const cameraInitialPos = d.vec4f(5, 2, 5, 1);
 const cameraInitial = {
@@ -178,9 +181,9 @@ function render() {
 }
 console.log('Cube position:', await vertexBuffer.read());
 
-let destoyed = false;
+let destroyed = false;
 function frame() {
-  if (destoyed) {
+  if (destroyed) {
     return;
   }
   requestAnimationFrame(frame);
@@ -189,64 +192,158 @@ function frame() {
 
 // #region Camera controls
 
+// Variables for mouse interaction.
 let isDragging = false;
 let prevX = 0;
 let prevY = 0;
-let rotation = m.mat4.identity(d.mat4x4f());
+let isRightDragging = false;
+let rightPrevX = 0;
+let rightPrevY = 0;
+let orbitRadius = Math.sqrt(
+  cameraInitialPos.x * cameraInitialPos.x +
+    cameraInitialPos.y * cameraInitialPos.y +
+    cameraInitialPos.z * cameraInitialPos.z,
+);
 
-canvas.addEventListener('mousedown', (event) => {
-  isDragging = true;
-  prevX = event.clientX;
-  prevY = event.clientY;
-});
+// Yaw and pitch angles facing the origin.
+let orbitYaw = Math.atan2(cameraInitialPos.x, cameraInitialPos.z);
+let orbitPitch = Math.asin(cameraInitialPos.y / orbitRadius);
 
-canvas.addEventListener('mouseup', () => {
-  isDragging = false;
-});
-
-canvas.addEventListener('mousemove', (event) => {
-  if (!isDragging) {
-    return;
-  }
-
-  const dx = event.clientX - prevX;
-  const dy = event.clientY - prevY;
-  prevX = event.clientX;
-  prevY = event.clientY;
+// Helper functions for updating transforms.
+function updateCubesRotation(dx: number, dy: number) {
   const sensitivity = 0.003;
   const yaw = -dx * sensitivity;
   const pitch = -dy * sensitivity;
+}
 
-  const yawMatrix = m.mat4.rotateY(
-    m.mat4.identity(d.mat4x4f()),
-    yaw,
-    d.mat4x4f(),
-  );
-  const pitchMatrix = m.mat4.rotateX(
-    m.mat4.identity(d.mat4x4f()),
-    pitch,
-    d.mat4x4f(),
-  );
+function updateCameraOrbit(dx: number, dy: number) {
+  const orbitSensitivity = 0.01;
+  orbitYaw += -dx * orbitSensitivity;
+  orbitPitch += -dy * orbitSensitivity;
+  // if we don't limit pitch, it would lead to flipping the camera which is disorienting.
+  const maxPitch = Math.PI / 2 - 0.01;
+  if (orbitPitch > maxPitch) orbitPitch = maxPitch;
+  if (orbitPitch < -maxPitch) orbitPitch = -maxPitch;
+  // basically converting spherical coordinates to cartesian.
+  // like sampling points on a unit sphere and then scaling them by the radius.
+  const newCamX = orbitRadius * Math.sin(orbitYaw) * Math.cos(orbitPitch);
+  const newCamY = -orbitRadius * Math.sin(orbitPitch);
+  const newCamZ = orbitRadius * Math.cos(orbitYaw) * Math.cos(orbitPitch);
+  const newCameraPos = d.vec4f(newCamX, newCamY, newCamZ, 1);
 
-  const deltaRotation = m.mat4.mul(yawMatrix, pitchMatrix, d.mat4x4f());
-  rotation = m.mat4.mul(deltaRotation, rotation, d.mat4x4f());
-
-  const rotatedCamPos = m.mat4.mul(rotation, cameraInitialPos, d.vec4f());
   const newView = m.mat4.lookAt(
-    rotatedCamPos,
+    newCameraPos,
     target,
     d.vec3f(0, 1, 0),
     d.mat4x4f(),
   );
+  cameraBuffer.write({ view: newView, projection: cameraInitial.projection });
+}
 
-  cameraBuffer.writePartial({
-    view: newView,
-  });
+canvas.addEventListener('wheel', (event: WheelEvent) => {
+  event.preventDefault();
+  const zoomSensitivity = 0.05;
+  orbitRadius = Math.max(1, orbitRadius + event.deltaY * zoomSensitivity);
+  const newCamX = orbitRadius * Math.sin(orbitYaw) * Math.cos(orbitPitch);
+  const newCamY = orbitRadius * Math.sin(orbitPitch);
+  const newCamZ = orbitRadius * Math.cos(orbitYaw) * Math.cos(orbitPitch);
+  const newCameraPos = d.vec4f(newCamX, newCamY, newCamZ, 1);
+  const newView = m.mat4.lookAt(
+    newCameraPos,
+    target,
+    d.vec3f(0, 1, 0),
+    d.mat4x4f(),
+  );
+  cameraBuffer.write({ view: newView, projection: cameraInitial.projection });
+});
+
+canvas.addEventListener('mousedown', (event) => {
+  if (event.button === 0) {
+    // Left Mouse Button controls Camera Orbit.
+    isRightDragging = true;
+    rightPrevX = event.clientX;
+    rightPrevY = event.clientY;
+  } else if (event.button === 2) {
+    // Right Mouse Button controls Cube Rotation.
+    isDragging = true;
+    prevX = event.clientX;
+    prevY = event.clientY;
+  }
+});
+
+canvas.addEventListener('mouseup', (event) => {
+  if (event.button === 0) {
+    isRightDragging = false;
+  } else if (event.button === 2) {
+    isDragging = false;
+  }
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  if (isDragging) {
+    const dx = event.clientX - prevX;
+    const dy = event.clientY - prevY;
+    prevX = event.clientX;
+    prevY = event.clientY;
+    updateCubesRotation(dx, dy);
+  }
+  if (isRightDragging) {
+    const dx = event.clientX - rightPrevX;
+    const dy = event.clientY - rightPrevY;
+    rightPrevX = event.clientX;
+    rightPrevY = event.clientY;
+    updateCameraOrbit(dx, dy);
+  }
+});
+
+// Mobile touch support.
+canvas.addEventListener('touchstart', (event: TouchEvent) => {
+  event.preventDefault();
+  if (event.touches.length === 1) {
+    // Single touch controls Camera Orbit.
+    isRightDragging = true;
+    rightPrevX = event.touches[0].clientX;
+    rightPrevY = event.touches[0].clientY;
+  } else if (event.touches.length === 2) {
+    // Two-finger touch controls Cube Rotation.
+    isDragging = true;
+    // Use the first touch for rotation.
+    prevX = event.touches[0].clientX;
+    prevY = event.touches[0].clientY;
+  }
+});
+
+canvas.addEventListener('touchmove', (event: TouchEvent) => {
+  event.preventDefault();
+  if (isRightDragging && event.touches.length === 1) {
+    const touch = event.touches[0];
+    const dx = touch.clientX - rightPrevX;
+    const dy = touch.clientY - rightPrevY;
+    rightPrevX = touch.clientX;
+    rightPrevY = touch.clientY;
+    updateCameraOrbit(dx, dy);
+  }
+  if (isDragging && event.touches.length === 2) {
+    const touch = event.touches[0];
+    const dx = touch.clientX - prevX;
+    const dy = touch.clientY - prevY;
+    prevX = touch.clientX;
+    prevY = touch.clientY;
+    updateCubesRotation(dx, dy);
+  }
+});
+
+canvas.addEventListener('touchend', (event: TouchEvent) => {
+  event.preventDefault();
+  if (event.touches.length === 0) {
+    isRightDragging = false;
+    isDragging = false;
+  }
 });
 
 frame();
 
 export function onCleanup() {
-  destoyed = true;
+  destroyed = true;
   root.destroy();
 }
