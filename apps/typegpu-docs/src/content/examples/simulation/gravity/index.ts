@@ -2,7 +2,7 @@ import { load } from '@loaders.gl/core';
 import { OBJLoader } from '@loaders.gl/obj';
 import tgpu from 'typegpu';
 import * as d from 'typegpu/data';
-import { dot, mul, normalize } from 'typegpu/std';
+import { dot, max, mul, normalize, sub } from 'typegpu/std';
 import * as m from 'wgpu-matrix';
 
 const Vertex = d.struct({
@@ -36,6 +36,8 @@ const sampleTexture = tgpu['~unstable']
   .$uses({ shaderTexture, shaderSampler })
   .$name('sampleShader');
 
+
+  
 const mainVertex = tgpu['~unstable']
   .vertexFn({
     in: { position: d.vec4f, normal: d.vec3f, uv: d.vec2f },
@@ -43,34 +45,48 @@ const mainVertex = tgpu['~unstable']
       position: d.builtin.position,
       uv: d.location(1, d.vec2f),
       normals: d.location(2, d.vec3f),
+      relativeToCamera: d.location(3, d.vec3f),
     },
   })
   .does((input) => {
+    const relativeToCamera = mul(camera.value.view, input.position);
     const pos = mul(
       camera.value.projection,
-      mul(camera.value.view, input.position),
+      relativeToCamera
     );
+
 
     return {
       position: pos,
       uv: input.uv,
       normals: input.normal,
+      relativeToCamera: relativeToCamera.xyz,
     };
   })
   .$name('mainVertex');
-const light_direction = normalize(d.vec3f(2.0, 1.0, 0.5));
+
+const lightPosition = d.vec3f(3.0, 3.0, 2.5);
+const lightDirection = normalize(d.vec3f(2.0, 1.0, 0.5));
 const mainFragment = tgpu['~unstable']
   .fragmentFn({
-    in: { uv: d.location(1, d.vec2f), normals: d.location(2, d.vec3f) },
+    in: { uv: d.location(1, d.vec2f), normals: d.location(2, d.vec3f), worldPosition: d.location(3, d.vec3f) },
     out: d.location(0, d.vec4f),
   })
-  // .does((input) => sampleTexture(input.uv))
   .does((input) => {
-    const dotVal: number = dot(input.normals, light_direction);
-    const albedo = d.vec3f(0.4);
-    return d.vec4f(albedo.x * dotVal, albedo.y * dotVal, albedo.z * dotVal, 1);
+    // Directional lighting
+    const directionalLightIntensity = max(dot(input.normals, lightDirection), 0.0);
+    const directionalComponent = 0.4 * directionalLightIntensity;
+
+    // Point Lighting
+    const surfaceToLight = normalize(sub(lightPosition, input.worldPosition)); 
+    const pointLightIntensity = max(dot(input.normals, surfaceToLight), 0.0);
+    const pointComponent = 0.6 * pointLightIntensity;
+
+    const lighting = directionalComponent + pointComponent;
+    const albedo = d.vec3f(1.0, 1.0, 1.0); // base color
+    return d.vec4f(albedo.x * lighting, albedo.y * lighting, albedo.z * lighting, 1);
   })
-  .$uses({ light_direction })
+  .$uses({ light_direction: lightDirection })
   .$name('mainFragment');
 
 const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
