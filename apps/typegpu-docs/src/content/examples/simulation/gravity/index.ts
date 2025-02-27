@@ -2,7 +2,7 @@ import { load } from '@loaders.gl/core';
 import { OBJLoader } from '@loaders.gl/obj';
 import tgpu from 'typegpu';
 import * as d from 'typegpu/data';
-import { dot, max, mul, normalize, sub } from 'typegpu/std';
+import { add, dot, max, mul, normalize, pow, sub } from 'typegpu/std';
 import * as m from 'wgpu-matrix';
 
 const Vertex = d.struct({
@@ -13,6 +13,7 @@ const Vertex = d.struct({
 const vertexLayout = tgpu.vertexLayout((n: number) => d.arrayOf(Vertex, n));
 
 const Camera = d.struct({
+  position: d.vec3f,
   view: d.mat4x4f,
   projection: d.mat4x4f,
 });
@@ -21,45 +22,39 @@ const bindGroupLayout = tgpu.bindGroupLayout({
   texture: { texture: 'float' },
   sampler: { sampler: 'filtering' },
 });
-const {
-  camera,
-  texture: shaderTexture,
-  sampler: shaderSampler,
-} = bindGroupLayout.bound;
+const EXT = bindGroupLayout.bound;
 
 // Shaders
 const sampleTexture = tgpu['~unstable']
   .fn([d.vec2f], d.vec4f)
   .does(/*wgsl*/ `(uv: vec2<f32>) -> vec4<f32> {
-    return textureSample(shaderTexture, shaderSampler, uv);
+    return textureSample(EXT.texture, EXT.sampler, uv);
   }`)
-  .$uses({ shaderTexture, shaderSampler })
+  .$uses({ EXT })
   .$name('sampleShader');
 
-const vertexShaderOutput = {
+const VertexOutput = {
     position: d.builtin.position,
     uv: d.vec2f,
     normals: d.vec3f,
-    relativeToCamera: d.vec3f,
+    worldPosition: d.vec3f,
 }
   
 const mainVertex = tgpu['~unstable']
   .vertexFn({
     in: { position: d.vec4f, normal: d.vec3f, uv: d.vec2f },
-    out: vertexShaderOutput,
+    out: VertexOutput,
   })
   .does((input) => {
-    const relativeToCamera = mul(camera.value.view, input.position);
-    const pos = mul(
-      camera.value.projection,
-      relativeToCamera
-    );
+    const camera = EXT.camera.value;
+    const worldPosition = input.position;
+    const relativeToCamera = mul(camera.view, worldPosition);
 
     return {
-      position: pos,
+      position: mul(camera.projection, relativeToCamera),
       uv: input.uv,
       normals: input.normal,
-      relativeToCamera: relativeToCamera.xyz,
+      worldPosition: worldPosition.xyz,
     };
   })
   .$name('mainVertex');
@@ -68,22 +63,31 @@ const lightPosition = d.vec3f(3.0, 3.0, 2.5);
 const lightDirection = normalize(d.vec3f(2.0, 1.0, 0.5));
 const mainFragment = tgpu['~unstable']
   .fragmentFn({
-    in: vertexShaderOutput,
+    in: VertexOutput,
     out: d.vec4f,
   })
   .does((input) => {
+    const normal = normalize(input.normals);
     // Directional lighting
-    const directionalLightIntensity = max(dot(input.normals, lightDirection), 0.0);
+    const directionalLightIntensity = max(dot(normal, lightDirection), 0.0);
     const directionalComponent = 0.4 * directionalLightIntensity;
 
     // Point Lighting
-    const surfaceToLight = normalize(sub(lightPosition, input.relativeToCamera)); 
-    const pointLightIntensity = max(dot(input.normals, surfaceToLight), 0.0);
+    const surfaceToLight = normalize(sub(lightPosition, input.worldPosition)); 
+    const pointLightIntensity = max(dot(normal, surfaceToLight), 0.0);
     const pointComponent = 0.6 * pointLightIntensity;
 
     const lighting = directionalComponent + pointComponent;
     const albedo = d.vec3f(1.0, 1.0, 1.0); // base color
-    return d.vec4f(albedo.x * lighting, albedo.y * lighting, albedo.z * lighting, 1);
+
+    const cameraPos = EXT.camera.value.position;
+    const surfaceToCamera = normalize(sub(EXT.camera.value.position, input.worldPosition));
+
+    const halfVector = normalize(add(surfaceToLight, surfaceToCamera));
+    const specular = pow(max(dot(normal, halfVector), 0.0), 3);
+    return d.vec4f(albedo.x * lighting  * specular, albedo.y * lighting * specular, albedo.z * lighting * specular, 1);
+    // return d.vec4f(specular,specular,specular, 1);
+
   })
   .$name('mainFragment');
 
@@ -123,7 +127,8 @@ const sampler = device.createSampler({
 // Cameraff
 const target = d.vec3f(0, 0, 0);
 const cameraInitialPos = d.vec4f(5, 2, 5, 1);
-const cameraInitial = {
+const cameraInitial = Camera({
+  position: cameraInitialPos.xyz,
   view: m.mat4.lookAt(cameraInitialPos, target, d.vec3f(0, 1, 0), d.mat4x4f()),
   projection: m.mat4.perspective(
     Math.PI / 4,
@@ -132,7 +137,7 @@ const cameraInitial = {
     1000,
     d.mat4x4f(),
   ),
-};
+});
 const cameraBuffer = root.createBuffer(Camera, cameraInitial).$usage('uniform');
 
 const bindGroup = root.createBindGroup(bindGroupLayout, {
@@ -251,7 +256,7 @@ function updateCameraOrbit(dx: number, dy: number) {
     d.vec3f(0, 1, 0),
     d.mat4x4f(),
   );
-  cameraBuffer.write({ view: newView, projection: cameraInitial.projection });
+  cameraBuffer.write({position:newCameraPos.xyz, view: newView, projection: cameraInitial.projection });
 }
 
 canvas.addEventListener('wheel', (event: WheelEvent) => {
@@ -268,7 +273,7 @@ canvas.addEventListener('wheel', (event: WheelEvent) => {
     d.vec3f(0, 1, 0),
     d.mat4x4f(),
   );
-  cameraBuffer.write({ view: newView, projection: cameraInitial.projection });
+  cameraBuffer.write({position:newCameraPos.xyz, view: newView, projection: cameraInitial.projection });
 });
 
 canvas.addEventListener('mousedown', (event) => {
