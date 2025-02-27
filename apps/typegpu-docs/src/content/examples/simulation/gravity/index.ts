@@ -6,9 +6,9 @@ import { dot, max, mul, normalize, sub } from 'typegpu/std';
 import * as m from 'wgpu-matrix';
 
 const Vertex = d.struct({
-  position: d.location(0, d.vec3f),
-  normal: d.location(1, d.vec3f),
-  uv: d.location(2, d.vec2f),
+  position: d.vec3f,
+  normal: d.vec3f,
+  uv: d.vec2f,
 });
 const vertexLayout = tgpu.vertexLayout((n: number) => d.arrayOf(Vertex, n));
 
@@ -36,17 +36,17 @@ const sampleTexture = tgpu['~unstable']
   .$uses({ shaderTexture, shaderSampler })
   .$name('sampleShader');
 
-
+const vertexShaderOutput = {
+    position: d.builtin.position,
+    uv: d.vec2f,
+    normals: d.vec3f,
+    relativeToCamera: d.vec3f,
+}
   
 const mainVertex = tgpu['~unstable']
   .vertexFn({
     in: { position: d.vec4f, normal: d.vec3f, uv: d.vec2f },
-    out: {
-      position: d.builtin.position,
-      uv: d.location(1, d.vec2f),
-      normals: d.location(2, d.vec3f),
-      relativeToCamera: d.location(3, d.vec3f),
-    },
+    out: vertexShaderOutput,
   })
   .does((input) => {
     const relativeToCamera = mul(camera.value.view, input.position);
@@ -54,7 +54,6 @@ const mainVertex = tgpu['~unstable']
       camera.value.projection,
       relativeToCamera
     );
-
 
     return {
       position: pos,
@@ -69,8 +68,8 @@ const lightPosition = d.vec3f(3.0, 3.0, 2.5);
 const lightDirection = normalize(d.vec3f(2.0, 1.0, 0.5));
 const mainFragment = tgpu['~unstable']
   .fragmentFn({
-    in: { uv: d.location(1, d.vec2f), normals: d.location(2, d.vec3f), worldPosition: d.location(3, d.vec3f) },
-    out: d.location(0, d.vec4f),
+    in: vertexShaderOutput,
+    out: d.vec4f,
   })
   .does((input) => {
     // Directional lighting
@@ -78,7 +77,7 @@ const mainFragment = tgpu['~unstable']
     const directionalComponent = 0.4 * directionalLightIntensity;
 
     // Point Lighting
-    const surfaceToLight = normalize(sub(lightPosition, input.worldPosition)); 
+    const surfaceToLight = normalize(sub(lightPosition, input.relativeToCamera)); 
     const pointLightIntensity = max(dot(input.normals, surfaceToLight), 0.0);
     const pointComponent = 0.6 * pointLightIntensity;
 
@@ -86,7 +85,6 @@ const mainFragment = tgpu['~unstable']
     const albedo = d.vec3f(1.0, 1.0, 1.0); // base color
     return d.vec4f(albedo.x * lighting, albedo.y * lighting, albedo.z * lighting, 1);
   })
-  .$uses({ light_direction: lightDirection })
   .$name('mainFragment');
 
 const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
