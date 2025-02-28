@@ -28,11 +28,10 @@ const metaFiles: Record<string, ExampleMetadata> = pathToExampleKey(
   }),
 );
 
-const readonlyTsFiles: Record<string, string> = pathToExampleKey(
+const tsFilePaths: Record<string, string> = pathToExampleKey(
   import.meta.glob('../../content/examples/**/index.ts', {
-    query: 'raw',
+    query: 'url',
     eager: true,
-    import: 'default',
   }),
 );
 
@@ -65,7 +64,7 @@ export const examples = pipe(
         {
           key,
           metadata: value,
-          tsCode: readonlyTsFiles[key] ?? '',
+          tsPath: tsFilePaths[key] ?? '',
           htmlCode: htmlFiles[key] ?? '',
           execTsCode: moduleToString(execTsFiles[key]),
         },
@@ -73,7 +72,6 @@ export const examples = pipe(
   ),
   fromEntries(),
 );
-
 export const examplesStable = pipe(
   examples,
   entries(),

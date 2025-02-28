@@ -17,7 +17,7 @@ export const exampleCategories = [
 
 export type Example = {
   key: string;
-  tsCode: string;
+  tsPath: string;
   htmlCode: string;
   metadata: ExampleMetadata;
   execTsCode: string;
