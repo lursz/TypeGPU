@@ -22,7 +22,7 @@ export const openInStackBlitz = (example: Example) => {
       title: example.metadata.title,
       files: {
         'index.ts': index.slice('// @ts-ignore\n'.length),
-        'src/example.ts': example.tsCode.replaceAll(
+        'src/example.ts': example.tsPath.replaceAll(
           '/TypeGPU',
           'https://docs.swmansion.com/TypeGPU',
         ),

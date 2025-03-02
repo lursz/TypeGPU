@@ -22,7 +22,7 @@ type Props = {
 };
 
 function useExample(
-  exampleCode: string,
+  examplePath: string,
   htmlCode: string,
   setSnackbarText: (text: string | undefined) => void,
 ) {
@@ -34,7 +34,7 @@ function useExample(
     let cancelled = false;
     setSnackbarText(undefined);
 
-    executeExample(exampleCode)
+    executeExample(examplePath)
       .then((example) => {
         if (cancelled) {
           // Another instance was started in the meantime.
@@ -63,13 +63,14 @@ function useExample(
       exampleRef.current?.dispose();
       cancelled = true;
     };
-  }, [exampleCode, htmlCode, setSnackbarText, setExampleControlParams]);
+  }, [examplePath, htmlCode, setSnackbarText, setExampleControlParams]);
 }
 
 type EditorTab = 'ts' | 'html';
 
 export function ExampleView({ example }: Props) {
-  const { tsCode, htmlCode, execTsCode } = example;
+  // Now we use tsPath instead of execTsCode.
+  const { tsPath, htmlCode } = example;
 
   const [snackbarText, setSnackbarText] = useAtom(currentSnackbarAtom);
   const [currentEditorTab, setCurrentEditorTab] = useState<EditorTab>('ts');
@@ -85,10 +86,11 @@ export function ExampleView({ example }: Props) {
       return;
     }
     exampleHtmlRef.current.innerHTML = htmlCode;
-  }, [tsCode, htmlCode]);
+  }, [tsPath, htmlCode]);
 
-  useExample(execTsCode, htmlCode, setSnackbarText);
-  useResizableCanvas(exampleHtmlRef, tsCode, htmlCode);
+  // Pass tsPath (the file path) to the runner.
+  useExample(tsPath, htmlCode, setSnackbarText);
+  useResizableCanvas(exampleHtmlRef, tsPath, htmlCode);
 
   return (
     <>
@@ -137,7 +139,7 @@ export function ExampleView({ example }: Props) {
                   setCurrentEditorTab={setCurrentEditorTab}
                 />
 
-                <TsCodeEditor shown={currentEditorTab === 'ts'} code={tsCode} />
+                <TsCodeEditor shown={currentEditorTab === 'ts'} code={tsPath} />
 
                 <HtmlCodeEditor
                   shown={currentEditorTab === 'html'}

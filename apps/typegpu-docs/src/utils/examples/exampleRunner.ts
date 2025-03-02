@@ -112,7 +112,7 @@ function tsToJs(code: string): string {
 type Labelless<T> = T extends unknown ? Omit<T, 'label'> : never;
 
 export async function executeExample(
-  exampleCode: string,
+  examplePath: string,
 ): Promise<ExampleState> {
   const cleanupCallbacks: (() => unknown)[] = [];
 
@@ -189,23 +189,13 @@ export async function executeExample(
       throw new Error(`Module ${moduleKey} is not available in the sandbox.`);
     };
 
-    const jsCode = tsToJs(exampleCode);
-
-    const transformedCode =
-      Babel.transform(jsCode, {
-        compact: false,
-        retainLines: true,
-        plugins: [exportedOptionsToExampleControls, staticToDynamicImports],
-      }).code ?? jsCode;
-
-    const mod = Function(`
-return async (_import) => {
-${transformedCode}
-};
-`);
-
-    // Running the code
-    await mod()(_import);
+    // Convert examplePath to a string explicitly.
+    const mod = await import(`${examplePath}`);
+    if (typeof mod.default === 'function') {
+      // If the module exports a default function, call it with _import.
+      await mod.default(_import);
+    }
+    // Otherwise, just let the module's top-level code run.
 
     return {
       dispose,
