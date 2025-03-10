@@ -1,10 +1,10 @@
-import z from 'zod';
+import { type } from 'arktype';
 
-export type ExampleMetadata = z.infer<typeof ExampleMetadata>;
-export const ExampleMetadata = z.object({
-  title: z.string(),
-  category: z.string(),
-  tags: z.array(z.string()).optional(),
+export type ExampleMetadata = typeof ExampleMetadata.infer;
+export const ExampleMetadata = type({
+  title: 'string',
+  category: 'string',
+  'tags?': 'string[]',
 });
 
 export const exampleCategories = [
@@ -17,10 +17,10 @@ export const exampleCategories = [
 
 export type Example = {
   key: string;
-  tsCode: string;
+  tsCodes: Record<string, string>;
+  tsImports: Record<string, () => Promise<unknown>>;
   htmlCode: string;
   metadata: ExampleMetadata;
-  execTsCode: string;
 };
 
 export type Module = {

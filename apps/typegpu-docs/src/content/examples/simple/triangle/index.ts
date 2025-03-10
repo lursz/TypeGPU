@@ -5,6 +5,9 @@ const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const context = canvas.getContext('webgpu') as GPUCanvasContext;
 
+const purple = d.vec4f(0.769, 0.392, 1.0, 1);
+const blue = d.vec4f(0.114, 0.447, 0.941, 1);
+
 const root = await tgpu.init();
 
 context.configure({
@@ -12,9 +15,6 @@ context.configure({
   format: presentationFormat,
   alphaMode: 'premultiplied',
 });
-
-const purple = d.vec4f(0.769, 0.392, 1.0, 1);
-const blue = d.vec4f(0.114, 0.447, 0.941, 1);
 
 const getGradientColor = tgpu['~unstable']
   .fn([d.f32], d.vec4f)
@@ -58,14 +58,16 @@ const pipeline = root['~unstable']
   .withFragment(mainFragment, { format: presentationFormat })
   .createPipeline();
 
-pipeline
-  .withColorAttachment({
-    view: context.getCurrentTexture().createView(),
-    clearValue: [0, 0, 0, 0],
-    loadOp: 'clear',
-    storeOp: 'store',
-  })
-  .draw(3);
+setTimeout(() => {
+  pipeline
+    .withColorAttachment({
+      view: context.getCurrentTexture().createView(),
+      clearValue: [0, 0, 0, 0],
+      loadOp: 'clear',
+      storeOp: 'store',
+    })
+    .draw(3);
 
-root['~unstable'].flush();
-root.destroy();
+  root['~unstable'].flush();
+  root.destroy();
+}, 100);

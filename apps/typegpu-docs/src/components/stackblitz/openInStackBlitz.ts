@@ -1,18 +1,40 @@
 import StackBlitzSDK from '@stackblitz/sdk';
+import { parse } from '@std/yaml';
+import { type } from 'arktype';
+import typegpuPackageJson from '../../../../../packages/typegpu/package.json';
+import unpluginPackageJson from '../../../../../packages/unplugin-typegpu/package.json';
+import pnpmWorkspace from '../../../../../pnpm-workspace.yaml?raw';
+import typegpuDocsPackageJson from '../../../package.json';
 import type { Example } from '../../utils/examples/types';
 import index from './stackBlitzIndex.ts?raw';
 
-export function openInStackBlitz(example: Example) {
+const pnpmWorkspaceYaml = type({
+  catalog: { typescript: 'string', '@webgpu/types': 'string' },
+})(parse(pnpmWorkspace));
+
+if (pnpmWorkspaceYaml instanceof type.errors) {
+  throw new Error(pnpmWorkspaceYaml.message);
+}
+
+export const openInStackBlitz = (example: Example) => {
+  const tsFiles = Object.entries(example.tsCodes).reduce(
+    (acc, [fileName, code]) => {
+      acc[`src/${fileName}`] = code.replaceAll(
+        '/TypeGPU',
+        'https://docs.swmansion.com/TypeGPU',
+      );
+      return acc;
+    },
+    {} as Record<string, string>,
+  );
+
   StackBlitzSDK.openProject(
     {
       template: 'node',
       title: example.metadata.title,
       files: {
         'index.ts': index.slice('// @ts-ignore\n'.length),
-        'src/example.ts': example.tsCode.replaceAll(
-          '/TypeGPU',
-          'https://docs.swmansion.com/TypeGPU',
-        ),
+        ...tsFiles,
         'index.html': `\
 <!DOCTYPE html>
 <html lang="en">
@@ -41,7 +63,7 @@ ${example.htmlCode}
         "noEmit": true,
         "strict": true,
         "noUnusedLocals": true,
-        "noUnusedParameters": true,
+        "noUnusedParameters": true
     },
     "include": ["src", "index.ts"]
 }`,
@@ -56,13 +78,14 @@ ${example.htmlCode}
       "preview": "vite preview"
     },
     "devDependencies": {
-      "typescript": "^5.7.3",
-      "vite": "^5.4.2"
+      "typescript": "${pnpmWorkspaceYaml.catalog.typescript}",
+      "vite": "^6.1.1",
+      "@webgpu/types": "${pnpmWorkspaceYaml.catalog['@webgpu/types']}"
     },
     "dependencies": {
-      "@webgpu/types": "^0.1.54",
-      "typegpu": "^0.4.3",
-      "unplugin-typegpu": "^0.1.0-alpha.3"
+      "typegpu": "^${typegpuPackageJson.version}",
+      "unplugin-typegpu": "^${unpluginPackageJson.version}",
+      "wgpu-matrix": "${typegpuDocsPackageJson.dependencies['wgpu-matrix']}"
     }
 }`,
         'vite.config.js': `\
@@ -76,9 +99,9 @@ export default defineConfig({
       },
     },
     {
-      openFile: 'src/example.ts',
+      openFile: 'src/index.ts',
       newWindow: true,
       theme: 'light',
     },
   );
-}
+};

@@ -87,6 +87,16 @@ export function abs<T extends vBase | number>(value: T): T {
   return VectorOps.abs[value.kind](value) as T;
 }
 
+export function atan2<T extends vBase | number>(y: T, x: T): T {
+  if (inGPUMode()) {
+    return `atan2(${y}, ${x})` as unknown as T;
+  }
+  if (typeof y === 'number' && typeof x === 'number') {
+    return Math.atan2(y, x) as T;
+  }
+  return VectorOps.atan2[(y as vBase).kind](y as never, x as never) as T;
+}
+
 /**
  * @privateRemarks
  * https://www.w3.org/TR/WGSL/#ceil-builtin
@@ -299,9 +309,6 @@ export function mix<T extends v2f | v3f | v4f | v2h | v3h | v4h | number>(
 export function reflect<T extends vBase>(e1: T, e2: T): T {
   if (inGPUMode()) {
     return `reflect(${e1}, ${e2})` as unknown as T;
-  }
-  if (typeof e1 === 'number' || typeof e2 === 'number') {
-    throw new Error('e1 and e2 need to both be vectors of the same kind.');
   }
   return sub(e1, mul(2 * dot(e2, e1), e2));
 }
